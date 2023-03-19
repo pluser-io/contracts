@@ -8,3 +8,4 @@ typechain-types
 # Hardhat files
 cache
 artifacts
+.DC_Store
