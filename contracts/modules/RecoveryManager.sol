@@ -16,9 +16,6 @@ import "../libs/Request.sol";
 contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgradeable {
     using Request for Request.NewDeviceKey;
 
-    bytes32 private constant _CREATE_TYPEHASH = keccak256("CreateRequest(address key,uint256 nonce)");
-    bytes32 private constant _CANCEL_TYPEHASH = keccak256("CancelRequest(address key,uint256 unlockTime,uint256 nonce)");
-
     uint256 public constant REQUEST_TIMEOUT = 3 days;
 
     GnosisSafe public wallet;
@@ -35,7 +32,6 @@ contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgr
 
     function initialize(GnosisSafe wallet_, address authKey_, TwoFactorGuard guard_) external initializer {
         __EIP712_init("RecoveryManager", "1");
-        uint chainId;
 
         wallet = wallet_;
         authKey = authKey_;
@@ -47,59 +43,26 @@ contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgr
         _;
     }
 
-    modifier onlyAuthKeyOrGuardOwner() {
-        address sender = _msgSender();
-        address verifyer = address(guard.twoFactorVerifier());
-
-        require(sender == authKey || sender == verifyer, "RequestManager: Permission denied");
-        _;
-    }
-
-    function createRequest(address newDeviceKey, bytes calldata guarderSignatures) public onlyAuthKey {
+    function createRequest(address newDeviceKey) public onlyAuthKey {
         require(!wallet.isOwner(newDeviceKey), "RequestManager: Owner already exists");
-
-        // slither-disable-next-line timestamp
         require(!request.isExist(), "RequestManager: Request already exists");
-
-        guard.verifyGuarderSignatures(
-            _hashTypedDataV4(keccak256(abi.encode(_CREATE_TYPEHASH, newDeviceKey, ++requestNonce))),
-            guarderSignatures
-        );
 
         // slither-disable-next-line timestamp
         request = Request.NewDeviceKey({ deviceKey: newDeviceKey, unlockTime: block.timestamp + REQUEST_TIMEOUT });
     }
 
-    function cancelRequest(bytes calldata guarderSignatures) public onlyAuthKey {
-        // slither-disable-next-line timestamp
+    function cancelRequest() public onlyAuthKey {
         require(request.isExist(), "RequestManager: Request not exists");
-
-        guard.verifyGuarderSignatures(
-            _hashTypedDataV4(keccak256(abi.encode(_CANCEL_TYPEHASH, request.deviceKey, request.unlockTime, ++requestNonce))),
-            guarderSignatures
-        );
-
         request.reset();
     }
 
-    function recovery() public onlyAuthKeyOrGuardOwner {
-        // slither-disable-next-line timestamp
+    function restore() public onlyAuthKey {
         require(request.isExist(), "RequestManager: Request not exists");
         require(request.isUnlocked(), "RequestManager: Request not unlocked");
 
-        require(
-            wallet.execTransactionFromModule(
-                address(wallet),
-                0,
-                abi.encodeCall(wallet.addOwnerWithThreshold, (request.deviceKey, 1)),
-                Enum.Operation.Call
-            ),
-            "RequestManager: Add owner failed"
-        );
-
         address[] memory owners = wallet.getOwners();
         // TODO: calls-loop - security issue
-        for (uint256 i = 1; i < owners.length; i++) {
+        for (uint256 i = 0; i < owners.length; i++) {
             require(
                 wallet.execTransactionFromModule(
                     address(wallet),
@@ -111,6 +74,18 @@ contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgr
             );
         }
 
+        require(
+            wallet.execTransactionFromModule(
+                address(wallet),
+                0,
+                abi.encodeCall(wallet.addOwnerWithThreshold, (request.deviceKey, 1)),
+                Enum.Operation.Call
+            ),
+            "RequestManager: Add owner failed"
+        );
+
         request.reset();
     }
 }
+
+//TODO: add device key with authKey + deviceKey signature

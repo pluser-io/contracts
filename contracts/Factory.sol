@@ -4,9 +4,9 @@ pragma solidity 0.8.19;
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/Create2Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
+import "@openzeppelin/contracts/utils/Create2.sol";
 
 import "@gnosis.pm/safe-contracts/contracts/GnosisSafe.sol";
 import "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
@@ -37,15 +37,21 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         _disableInitializers();
     }
 
-    function initialize(TwoFactorGuard twoFactorGuard_, GnosisSafe singleton, address trustedForwarder_) external initializer {
+    function initialize(
+        TwoFactorGuard twoFactorGuard_,
+        InitializationScriptV1 initScript_,
+        GnosisSafe singleton_,
+        RecoveryManager singletonRecoveryManager_
+    ) external initializer {
         __Ownable_init();
         __EIP712_init("PluserFactory", "1");
 
         StorageV1 storage store = _getStorage();
+
         store.twoFactorGuard = twoFactorGuard_;
-        store.initScript = new InitializationScriptV1();
-        store.singleton = singleton;
-        store.singletonRecoveryManager = new RecoveryManager(trustedForwarder_);
+        store.initScript = initScript_;
+        store.singleton = singleton_;
+        store.singletonRecoveryManager = singletonRecoveryManager_;
     }
 
     modifier onlyDeployer() {
@@ -82,7 +88,7 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
 
         wallet = GnosisSafe(
             payable(
-                Create2Upgradeable.deploy(
+                Create2.deploy(
                     0,
                     keccak256(abi.encodePacked(authKey)),
                     abi.encodePacked(type(GnosisSafeProxy).creationCode, uint256(uint160(address(store.singleton))))

@@ -1,6 +1,5 @@
 import { ethers } from "hardhat";
 import type { HardhatRuntimeEnvironment } from "hardhat/types";
-import type { GnosisSafe } from "../typechain-types";
 
 module.exports = async function (hre: HardhatRuntimeEnvironment) {
     const accounts = await hre.getUnnamedAccounts();
@@ -22,7 +21,7 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
         waitConfirmations: 1,
     });
 
-    // TODO: security issue deploy and setup need to be in one transaction
+    // TODO: only for testing
     if (twoFactorVerifyerContract.newlyDeployed) {
         await hre.deployments.rawTx({
             from: deployer,
@@ -44,12 +43,4 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
             waitConfirmations: 1,
         });
     }
-
-    await hre.deployments.deploy("TwoFactorGuard", {
-        from: deployer,
-        args: [twoFactorVerifyerContract.address],
-        log: true,
-        autoMine: true,
-        waitConfirmations: 1,
-    });
 };

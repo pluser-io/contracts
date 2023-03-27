@@ -1,6 +1,6 @@
 import { keccak256 } from "ethers/lib/utils";
 import { deployments, ethers } from "hardhat";
-import type { Factory, GnosisSafe, RecoveryManager } from "../typechain-types";
+import type { Deploy, Factory, GnosisSafe, RecoveryManager } from "../typechain-types";
 import type { Event, Wallet } from "ethers";
 
 enum GnosisOperation {
@@ -20,11 +20,17 @@ type DeployedAccountInfo = {
 
 const setupTestEnv = async () =>
     deployments.createFixture(async ({ deployments, ethers }): Promise<TestEnv> => {
+        process.env = {
+            ...process.env,
+            ACCOUNT_DEPLOYER: (await ethers.getSigners())[0]!.address,
+        };
         await deployments.fixture();
 
-        const factory = (await ethers.getContractAt("Factory", (await deployments.get("Factory")).address)) as Factory;
+        const deploy = (await ethers.getContractAt("Deploy", (await deployments.get("Deploy")).address)) as Deploy;
 
-        const singleton = (await ethers.getContractAt("Singleton", (await deployments.get("Singleton")).address)) as GnosisSafe;
+        const factory = (await ethers.getContractAt("Factory", await deploy.factory())) as Factory;
+
+        const singleton = (await ethers.getContractAt("Singleton", await deploy.gnosisSingleton())) as GnosisSafe;
 
         return {
             factory: factory,

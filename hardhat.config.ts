@@ -27,7 +27,7 @@ const config: HardhatUserConfig = {
             saveDeployments: true,
         },
         mumbai: {
-            url: "https://polygon-testnet.public.blastapi.io",
+            url: "https://rpc.ankr.com/polygon_mumbai",
             accounts: [process.env["PRIVATE_KEY"]!],
             saveDeployments: true,
         },
