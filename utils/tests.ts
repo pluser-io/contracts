@@ -2,6 +2,7 @@ import { keccak256 } from "ethers/lib/utils";
 import { deployments, ethers } from "hardhat";
 import type { Deploy, Factory, GnosisSafe, RecoveryManager } from "../typechain-types";
 import type { Event, Wallet } from "ethers";
+import { assert } from "chai";
 
 enum GnosisOperation {
     CALL = 0,
@@ -11,6 +12,7 @@ enum GnosisOperation {
 type TestEnv = {
     factory: Factory;
     singleton: GnosisSafe;
+    deploy: Deploy;
 };
 
 type DeployedAccountInfo = {
@@ -35,6 +37,7 @@ const setupTestEnv = async () =>
         return {
             factory: factory,
             singleton: singleton,
+            deploy: deploy,
         };
     })();
 
@@ -72,13 +75,15 @@ const deployAccount = async (
         }
     });
 
-    const { authKey, account, deivceKey, recoveryManager } = accountCreatedLog!.args!;
+    const { authKey, account, deviceKey, recoveryManager } = accountCreatedLog!.args!;
     const accountCreatedEvent = {
         authKey: authKey,
         account: account,
-        deivceKey: deivceKey,
+        deviceKey: deviceKey,
         recoveryManager: recoveryManager,
     };
+
+    assert(deviceKey.toLowerCase() === accountDeivceKey.address.toLowerCase());
 
     const accountContract = (await ethers.getContractAt("GnosisSafe", accountCreatedEvent.account)) as GnosisSafe;
     const recoveryManagerContract = (await ethers.getContractAt("RecoveryManager", accountCreatedEvent.recoveryManager)) as RecoveryManager;

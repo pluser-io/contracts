@@ -16,13 +16,15 @@ import "../libs/Request.sol";
 contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgradeable {
     using Request for Request.NewDeviceKey;
 
+    bytes32 private constant _ADD_DEVICE_TYPEHASH = keccak256("AddDevice(address newDeviceKey,uint256 nonce)");
+
     uint256 public constant REQUEST_TIMEOUT = 3 days;
 
     GnosisSafe public wallet;
     TwoFactorGuard public guard;
     address public authKey;
 
-    uint256 public requestNonce;
+    uint256 public nonce;
     Request.NewDeviceKey public request;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -41,6 +43,24 @@ contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgr
     modifier onlyAuthKey() {
         require(_msgSender() == authKey, "RequestManager: Permission denied");
         _;
+    }
+
+    function addDevice(bytes memory accountSignature, address newDeviceKey) public onlyAuthKey {
+        bytes32 structHash = keccak256(abi.encode(_ADD_DEVICE_TYPEHASH, newDeviceKey, nonce));
+        nonce++;
+
+        bytes memory empty = new bytes(0);
+        wallet.checkSignatures(_hashTypedDataV4(structHash), empty, accountSignature);
+
+        require(
+            wallet.execTransactionFromModule(
+                address(wallet),
+                0,
+                abi.encodeCall(wallet.addOwnerWithThreshold, (newDeviceKey, 1)),
+                Enum.Operation.Call
+            ),
+            "RequestManager: Add owner failed"
+        );
     }
 
     function createRequest(address newDeviceKey) public onlyAuthKey {
@@ -87,5 +107,3 @@ contract RecoveryManager is Initializable, ERC2771ContextUpgradeable, EIP712Upgr
         request.reset();
     }
 }
-
-//TODO: add device key with authKey + deviceKey signature
