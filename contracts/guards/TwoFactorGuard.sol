@@ -29,7 +29,7 @@ contract TwoFactorGuard is Guard, SignatureDecoder {
         address /* msgSender */
     ) external view {
         require(operation == Enum.Operation.Call, "TwoFactorGuard: Only calls are allowed");
-
+        /* TODO: after hackathon
         GnosisSafe wallet = GnosisSafe(payable(msg.sender));
 
         uint256 safeNonce = wallet.nonce() - 1;
@@ -45,8 +45,8 @@ contract TwoFactorGuard is Guard, SignatureDecoder {
             refundReceiver,
             safeNonce
         );
-
-        twoFactorVerifier.checkSignatures(txHash, data, _getTwoFactorSignatures(wallet, signatures));
+*/
+        // TODO: twoFactorVerifier.checkSignatures(txHash, data, _getTwoFactorSignatures(wallet, signatures));
     }
 
     function checkAfterExecution(bytes32 /*txHash*/, bool /*success*/) external pure {
