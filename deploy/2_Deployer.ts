@@ -4,12 +4,13 @@ import type { HardhatRuntimeEnvironment } from "hardhat/types";
 module.exports = async function (hre: HardhatRuntimeEnvironment) {
     const accounts = await hre.getUnnamedAccounts();
     const deployer = accounts[0]!;
+    const verifyer = accounts[1]!;
 
     await hre.upgrades.validateImplementation(await ethers.getContractFactory("Factory"));
 
     await hre.deployments.deploy("Deploy", {
         from: deployer,
-        args: [(await hre.deployments.get("TwoFactorVerifyer")).address],
+        args: [],
         log: true,
         autoMine: true,
         waitConfirmations: 1,
@@ -42,20 +43,6 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
         },
         "step2",
         (
-            await hre.deployments.getArtifact("TwoFactorGuard")
-        ).bytecode,
-    );
-
-    await hre.deployments.execute(
-        "Deploy",
-        {
-            from: deployer,
-            log: true,
-            autoMine: true,
-            waitConfirmations: 1,
-        },
-        "step3",
-        (
             await hre.deployments.getArtifact("GnosisSafe")
         ).bytecode,
         (
@@ -71,10 +58,11 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
             autoMine: true,
             waitConfirmations: 1,
         },
-        "step4",
+        "step3",
         (
             await hre.deployments.getArtifact("Factory")
         ).bytecode,
+        verifyer,
         process.env["ACCOUNT_DEPLOYER"]!,
     );
 };

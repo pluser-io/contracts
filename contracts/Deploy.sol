@@ -14,21 +14,13 @@ import "./scripts/InitializationScriptV1.sol";
 import "./Factory.sol";
 
 contract Deploy is Ownable {
-    GnosisSafe public twoFactorVerifyer;
-
     MinimalForwarder public forwarder;
     RecoveryManager public singeltonRecoveryManager;
-
-    TwoFactorGuard public twoFactorGuard;
 
     GnosisSafe public gnosisSingleton;
     InitializationScriptInterface public initScript;
 
     Factory public factory;
-
-    constructor(GnosisSafe twoFactorVerifyer_) {
-        twoFactorVerifyer = twoFactorVerifyer_;
-    }
 
     function step1(bytes calldata minimalForwarderCreationBytecode_, bytes calldata recoveryManagerCreationBytecode_) public onlyOwner {
         address _forwarder = Create2.deploy(0, keccak256("MinimalForwarder"), minimalForwarderCreationBytecode_);
@@ -43,27 +35,15 @@ contract Deploy is Ownable {
         singeltonRecoveryManager = RecoveryManager(_singeltonRecoveryManager);
     }
 
-    function step2(bytes calldata twoFactorGuardCreationBytecode_) public onlyOwner {
+    function step2(bytes calldata gnosisSafeCreationBytecode_, bytes calldata initScriptCreationBytecode_) public onlyOwner {
         require(address(forwarder) != address(0x00), "Forwarder is not deployed");
         require(address(singeltonRecoveryManager) != address(0x00), "RecoveryManager is not deployed");
-
-        address _twoFactorGuard = Create2.deploy(
-            0,
-            keccak256("TwoFactorGuard"),
-            abi.encodePacked(twoFactorGuardCreationBytecode_, abi.encode(twoFactorVerifyer))
-        );
-
-        twoFactorGuard = TwoFactorGuard(_twoFactorGuard);
-    }
-
-    function step3(bytes calldata gnosisSafeCreationBytecode_, bytes calldata initScriptCreationBytecode_) public onlyOwner {
-        require(address(twoFactorGuard) != address(0x00), "TwoFactorGuard is not deployed");
 
         gnosisSingleton = GnosisSafe(payable(Create2.deploy(0, keccak256("GnosisSafe"), gnosisSafeCreationBytecode_)));
         initScript = InitializationScriptV1(Create2.deploy(0, keccak256("InitializationScriptV1"), initScriptCreationBytecode_));
     }
 
-    function step4(bytes calldata factoryCreationBytecode_, address deployer) public onlyOwner {
+    function step3(bytes calldata factoryCreationBytecode_, address deployer, address verifyer) public onlyOwner {
         require(address(gnosisSingleton) != address(0x00), "Singleton is not deployed");
         require(address(initScript) != address(0x00), "InitScript is not deployed");
         require(address(factory) == address(0x00), "Factory is already deployed");
@@ -74,13 +54,7 @@ contract Deploy is Ownable {
             address(
                 new ERC1967Proxy(
                     address(_singeltonFactory),
-                    abi.encodeWithSelector(
-                        Factory.initialize.selector,
-                        twoFactorGuard,
-                        initScript,
-                        gnosisSingleton,
-                        singeltonRecoveryManager
-                    )
+                    abi.encodeWithSelector(Factory.initialize.selector, initScript, gnosisSingleton, singeltonRecoveryManager, verifyer)
                 )
             )
         );

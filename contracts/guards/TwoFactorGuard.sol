@@ -7,12 +7,13 @@ import { Guard } from "@gnosis.pm/safe-contracts/contracts/base/GuardManager.sol
 import "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
 import "@gnosis.pm/safe-contracts/contracts/GnosisSafe.sol";
 import "@gnosis.pm/safe-contracts/contracts/common/SignatureDecoder.sol";
+import "../Factory.sol";
 
 contract TwoFactorGuard is Guard, SignatureDecoder {
-    GnosisSafe public immutable twoFactorVerifier;
+    Factory public immutable factory;
 
-    constructor(GnosisSafe _twoFactorVerifier) {
-        twoFactorVerifier = _twoFactorVerifier;
+    constructor(Factory factory_) {
+        factory = factory_;
     }
 
     function checkTransaction(
@@ -29,7 +30,7 @@ contract TwoFactorGuard is Guard, SignatureDecoder {
         address /* msgSender */
     ) external view {
         require(operation == Enum.Operation.Call, "TwoFactorGuard: Only calls are allowed");
-        /* TODO: after hackathon
+
         GnosisSafe wallet = GnosisSafe(payable(msg.sender));
 
         uint256 safeNonce = wallet.nonce() - 1;
@@ -45,52 +46,16 @@ contract TwoFactorGuard is Guard, SignatureDecoder {
             refundReceiver,
             safeNonce
         );
-*/
-        // TODO: twoFactorVerifier.checkSignatures(txHash, data, _getTwoFactorSignatures(wallet, signatures));
+
+        address verifyer = factory.getTwoFactorVerifier();
+
+        uint256 walletThreshold = wallet.getThreshold();
+        (uint8 v, bytes32 r, bytes32 s) = signatureSplit(signatures, walletThreshold);
+
+        require(verifyer == ECDSA.recover(txHash, v, r, s), "TwoFactorGuard: Invalid signature");
     }
 
     function checkAfterExecution(bytes32 /*txHash*/, bool /*success*/) external pure {
         return;
-    }
-
-    function verifyGuarderSignatures(bytes32 dataHash, bytes calldata signatures) external view {
-        bytes memory emptyData = new bytes(0);
-        twoFactorVerifier.checkSignatures(dataHash, emptyData, signatures);
-    }
-
-    function _getTwoFactorSignatures(GnosisSafe wallet, bytes memory signatures) private view returns (bytes memory) {
-        uint256 twoFactorThreshold = twoFactorVerifier.getThreshold();
-        uint256 walletThreshold = wallet.getThreshold();
-
-        require(signatures.length >= (walletThreshold + twoFactorThreshold) * 65, "TwoFactorGuard: Not enough signatures");
-
-        bytes memory twoFactorSignatures = new bytes(twoFactorThreshold * 65);
-        {
-            for (uint256 i = 0; i < twoFactorThreshold; i++) {
-                uint8 v;
-                bytes32 r;
-                bytes32 s;
-
-                (v, r, s) = signatureSplit(signatures, walletThreshold + i);
-
-                uint256 signaturePos = i * 65;
-                uint256 twoFactorSignaturesValues;
-
-                // slither-disable-next-line assembly
-                assembly {
-                    // length slot. Signature is longer then 32 bytes. Length use one slot.
-                    twoFactorSignaturesValues := add(twoFactorSignatures, 0x20)
-
-                    // r is 32 bytes long
-                    mstore(add(twoFactorSignaturesValues, signaturePos), r)
-                    // s is 32 bytes long
-                    mstore(add(twoFactorSignaturesValues, add(signaturePos, 0x20)), s)
-                }
-                //TODO: safe version of mstore - will use assembly
-                twoFactorSignatures[signaturePos + 64] = bytes1(v);
-            }
-        }
-
-        return twoFactorSignatures;
     }
 }

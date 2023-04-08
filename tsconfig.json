@@ -20,8 +20,7 @@
         "noImplicitOverride": true,
         "noPropertyAccessFromIndexSignature": true,
         "noUncheckedIndexedAccess": true,
-        "noUnusedLocals": true,
-        "importsNotUsedAsValues": "error"
+        "noUnusedLocals": true
     },
     "exclude": ["dist", "node_modules"]
 }

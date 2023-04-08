@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
 
@@ -19,6 +20,7 @@ import "./scripts/InitializationScriptV1.sol";
 
 contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Upgradeable {
     struct StorageV1 {
+        address twoFactorVerifier;
         TwoFactorGuard twoFactorGuard;
         InitializationScriptInterface initScript;
         GnosisSafe singleton;
@@ -32,36 +34,35 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
 
     bytes32 private constant _CREATE_ACCOUNT_TYPEHASH = keccak256("CreateAccount(address authKey,address deviceKey)");
 
+    modifier onlyDeployer() {
+        require(_getStorage().deployers[msg.sender], "Not a deployer");
+        _;
+    }
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
     function initialize(
-        TwoFactorGuard twoFactorGuard_,
         InitializationScriptV1 initScript_,
         GnosisSafe singleton_,
-        RecoveryManager singletonRecoveryManager_
+        RecoveryManager singletonRecoveryManager_,
+        address twoFactorVerifier_
     ) external initializer {
         __Ownable_init();
         __EIP712_init("PluserFactory", "1");
 
         StorageV1 storage store = _getStorage();
 
-        store.twoFactorGuard = twoFactorGuard_;
+        store.twoFactorGuard = new TwoFactorGuard(Factory(address(this)));
         store.initScript = initScript_;
         store.singleton = singleton_;
         store.singletonRecoveryManager = singletonRecoveryManager_;
+        store.twoFactorVerifier = twoFactorVerifier_;
     }
 
-    modifier onlyDeployer() {
-        require(_getStorage().deployers[msg.sender], "Not a deployer");
-        _;
-    }
-
-    function isDeployer(address deployer) external view returns (bool) {
-        return _getStorage().deployers[deployer];
-    }
+    // ------ VIEW ------
 
     function getTwoFactorGuard() external view returns (TwoFactorGuard) {
         return _getStorage().twoFactorGuard;
@@ -71,12 +72,26 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         return _getStorage().initScript;
     }
 
+    function getTwoFactorVerifier() external view returns (address) {
+        return _getStorage().twoFactorVerifier;
+    }
+
+    function isDeployer(address deployer) external view returns (bool) {
+        return _getStorage().deployers[deployer];
+    }
+
+    // ------ MUTABLE ------
+
     function addDeployer(address deployer) external onlyOwner {
         _getStorage().deployers[deployer] = true;
     }
 
     function removeDeployer(address deployer) external onlyOwner {
         _getStorage().deployers[deployer] = false;
+    }
+
+    function setTwoFactorVerifier(address twoFactorVerifier_) external onlyOwner {
+        _getStorage().twoFactorVerifier = twoFactorVerifier_;
     }
 
     function deploy(address authKey, address deviceKey, bytes memory signature) external onlyDeployer returns (GnosisSafe wallet) {
