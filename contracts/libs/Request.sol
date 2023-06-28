@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.19;
 
-library Request {
-    struct NewDeviceKey {
-        address deviceKey;
+library RecoveryRequest {
+    struct NewSessionKey {
+        address key;
         uint256 unlockTime;
     }
 
-    function isUnlocked(NewDeviceKey storage self) internal view returns (bool) {
+    function isUnlocked(NewSessionKey storage self) internal view returns (bool) {
         // slither-disable-next-line timestamp
         return block.timestamp > self.unlockTime;
     }
 
-    function isExist(NewDeviceKey storage self) internal view returns (bool) {
-        return self.unlockTime != 0 && self.deviceKey != address(0x00);
+    function isExist(NewSessionKey storage self) internal view returns (bool) {
+        return self.unlockTime != 0 && self.key != address(0x00);
     }
 
-    function reset(NewDeviceKey storage self) internal {
+    function reset(NewSessionKey storage self) internal {
         self.unlockTime = 0;
-        self.deviceKey = address(0x00);
+        self.key = address(0x00);
     }
 }
