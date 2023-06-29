@@ -6,9 +6,9 @@ import "./InitializationScriptInterface.sol";
 
 contract InitializationScriptV1 is InitializationScriptInterface {
     function initializeAccount(PluserModule pluserModule) external {
-        GnosisSafe wallet = GnosisSafe(payable(address(this)));
+        GnosisSafe account = GnosisSafe(payable(address(this)));
 
-        wallet.enableModule(address(pluserModule));
-        wallet.setGuard(address(pluserModule));
+        account.enableModule(address(pluserModule));
+        account.setGuard(address(pluserModule));
     }
 }

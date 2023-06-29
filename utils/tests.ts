@@ -1,6 +1,6 @@
 import { keccak256 } from "ethers/lib/utils";
 import { deployments, ethers } from "hardhat";
-import type { Deploy, Factory, GnosisSafe, RecoveryManager } from "../typechain-types";
+import type { Deploy, Factory, GnosisSafe, PluserModule } from "../typechain-types";
 import type { Event, Wallet } from "ethers";
 import { assert } from "chai";
 
@@ -11,13 +11,12 @@ enum GnosisOperation {
 
 type TestEnv = {
     factory: Factory;
-    singleton: GnosisSafe;
     deploy: Deploy;
 };
 
 type DeployedAccountInfo = {
     account: GnosisSafe;
-    recoveryManager: RecoveryManager;
+    pluserModule: PluserModule;
 };
 
 const setupTestEnv = async () =>
@@ -32,38 +31,29 @@ const setupTestEnv = async () =>
 
         const factory = (await ethers.getContractAt("Factory", await deploy.factory())) as Factory;
 
-        const singleton = (await ethers.getContractAt("Singleton", await deploy.gnosisSingleton())) as GnosisSafe;
-
         return {
             factory: factory,
-            singleton: singleton,
             deploy: deploy,
         };
     })();
 
-const deployAccount = async (
-    accountAuthKey: Wallet,
-    accountDeivceKey: Wallet,
-    factory: Factory,
-    singleton: GnosisSafe,
-): Promise<DeployedAccountInfo> => {
+const deployAccount = async (accountAuthKey: Wallet, accountDeivceKey: Wallet, factory: Factory): Promise<DeployedAccountInfo> => {
     const signatures = await accountAuthKey._signTypedData(
         {
             name: "PluserFactory",
-            version: "1",
+            version: "1.0.0",
             chainId: 31337,
             verifyingContract: factory.address,
         },
         {
             CreateAccount: [
                 { name: "authKey", type: "address" },
-                { name: "deviceKey", type: "address" },
+                { name: "sessionKey", type: "address" },
             ],
         },
         {
-            singleton: singleton.address,
             authKey: accountAuthKey.address,
-            deviceKey: accountDeivceKey.address,
+            sessionKey: accountDeivceKey.address,
         },
     );
 
@@ -75,22 +65,22 @@ const deployAccount = async (
         }
     });
 
-    const { authKey, account, deviceKey, recoveryManager } = accountCreatedLog!.args!;
+    const { authKey, account, sessionKey, pluserModule } = accountCreatedLog!.args!;
     const accountCreatedEvent = {
         authKey: authKey,
         account: account,
-        deviceKey: deviceKey,
-        recoveryManager: recoveryManager,
+        sessionKey: sessionKey,
+        pluserModule: pluserModule,
     };
 
-    assert(deviceKey.toLowerCase() === accountDeivceKey.address.toLowerCase());
+    assert(sessionKey.toLowerCase() === accountDeivceKey.address.toLowerCase());
 
     const accountContract = (await ethers.getContractAt("GnosisSafe", accountCreatedEvent.account)) as GnosisSafe;
-    const recoveryManagerContract = (await ethers.getContractAt("RecoveryManager", accountCreatedEvent.recoveryManager)) as RecoveryManager;
+    const pluserModuleContract = (await ethers.getContractAt("PluserModule", accountCreatedEvent.pluserModule)) as PluserModule;
 
     return {
         account: accountContract,
-        recoveryManager: recoveryManagerContract,
+        pluserModule: pluserModuleContract,
     };
 };
 

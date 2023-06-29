@@ -8,9 +8,10 @@ import "@gnosis.pm/safe-contracts/contracts/common/SignatureDecoder.sol";
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 
-import "../guards/TwoFactorGuard.sol";
-import "../libs/Request.sol";
+import "../libs/RecoveryRequest.sol";
+import "../Factory.sol";
 
 contract PluserModuleState {
     // --------------- Constants ---------------
@@ -24,53 +25,57 @@ contract PluserModuleState {
     event Restored(address newSessionKey);
 
     // --------------- Typehashes ---------------
-    bytes32 private constant _CREATE_RECOVERY_REQUEST_TYPEHASH =
+    bytes32 internal constant _CREATE_RECOVERY_REQUEST_TYPEHASH =
         keccak256("CreateRecoveryRequest(address newSessionKey,uint256 nonce,uint256 signTimestamp)");
-    bytes32 private constant _CANCEL_RECOVERY_TYPEHASH = keccak256("CancelRecovery(uint256 nonce,uint256 signTimestamp)");
-    bytes32 private constant _EXECUTE_RECOVERY_REQUEST_TYPEHASH = keccak256("ExecuteRecoveryRequest(uint256 nonce,uint256 signTimestamp)");
+    bytes32 internal constant _CANCEL_RECOVERY_TYPEHASH = keccak256("CancelRecovery(uint256 nonce,uint256 signTimestamp)");
+    bytes32 internal constant _EXECUTE_RECOVERY_REQUEST_TYPEHASH = keccak256("ExecuteRecoveryRequest(uint256 nonce,uint256 signTimestamp)");
+    bytes32 internal constant _UPDATE_SESSION_KEY_TYPEHASH =
+        keccak256("UpdateSessionKey(address sessionKey,address newSessionKey,uint256 signTimestamp)");
 
     // --------------- Global vars ---------------
-    GnosisSafe public owner;
+    GnosisSafe public account;
     Factory public factory;
     address public authKey;
 
     mapping(address => uint) public timeoutBySessionKey;
 
     uint256 public recoveryNonce;
-    Request.NewSessionKey public recoveryRequest;
+    RecoveryRequest.NewSessionKey public recoveryRequest;
 }
 
-contract PluserModuleInternal is PluserModuleState {
-    function _verifySignature(uint8 v, bytes32 r, bytes32 s) private returns (address currentOwner) {
+contract PluserModuleInternal is SignatureDecoder, PluserModuleState {
+    function _verifySignature(bytes32 dataHash, uint8 v, bytes32 r, bytes32 s) internal pure returns (address currentAccount) {
         if (v > 30) {
-            currentOwner = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash)), v - 4, r, s);
+            currentAccount = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash)), v - 4, r, s);
         } else {
-            currentOwner = ecrecover(dataHash, v, r, s);
+            currentAccount = ecrecover(dataHash, v, r, s);
         }
 
-        require(currentOwner != address(0), "PluserModule: Invalid signature");
+        require(currentAccount != address(0), "PluserModule: Invalid signature");
 
-        return currentOwner;
+        return currentAccount;
     }
 }
 
-contract PluserModule is PluserModuleInternal, Guard {
-    using Request for Request.NewSessionKey;
+contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
+    using RecoveryRequest for RecoveryRequest.NewSessionKey;
 
     // --------------- Modifiers ---------------
-    modifier onlyOwner() {
-        require(msg.sender == address(owner), "PluserModule: Only owner");
+    modifier onlyAccount() {
+        require(msg.sender == address(account), "PluserModule: Only account");
         _;
     }
 
     // --------------- Initialize ---------------
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address trustedForwarder_) ERC2771Context(trustedForwarder_) {
+    constructor() {
         _disableInitializers();
     }
 
-    function initialize(GnosisSafe owner_, address authKey_, address sessionKey_) external initializer {
-        owner = owner_;
+    function initialize(GnosisSafe account_, address authKey_, address sessionKey_) external initializer {
+        __EIP712_init("PluserModule", "0.9.0");
+
+        account = account_;
         authKey = authKey_;
 
         timeoutBySessionKey[sessionKey_] = block.timestamp + SESSION_LIFETIME;
@@ -80,7 +85,7 @@ contract PluserModule is PluserModuleInternal, Guard {
     function checkTransaction(
         address to,
         uint256 value,
-        bytes memory data,
+        bytes calldata data,
         Enum.Operation operation,
         uint256 safeTxGas,
         uint256 baseGas,
@@ -92,10 +97,9 @@ contract PluserModule is PluserModuleInternal, Guard {
     ) external view {
         require(operation == Enum.Operation.Call, "TwoFactorGuard: Only calls are allowed");
 
-        require(msg.sender == owner, "TwoFactorGuard: Invalid sender"); //TODO: msg.sender or  address /* msgSender */?
+        require(msg.sender == address(account), "TwoFactorGuard: Invalid sender"); //TODO: msg.sender or  address /* msgSender */?
 
-        uint256 safeNonce = wallet.nonce() - 1;
-        bytes32 txHash = wallet.getTransactionHash(
+        bytes32 txHash = account.getTransactionHash(
             to,
             value,
             data,
@@ -105,23 +109,24 @@ contract PluserModule is PluserModuleInternal, Guard {
             gasPrice,
             gasToken,
             refundReceiver,
-            safeNonce
+            account.nonce() - 1
         );
 
-        bytes4 selector = data[0:4];
+        address signatureOwner;
+        {
+            (uint8 v, bytes32 r, bytes32 s) = signatureSplit(signatures, 0);
+            signatureOwner = _verifySignature(txHash, v, r, s);
+        }
 
         if (to == address(this)) {
+            bytes4 selector = bytes4(data[0:4]);
             require(selector == PluserModule.updateSession.selector, "PluserModule: Invalid selector");
-
             address sessionKey = abi.decode(data[16:36], (address));
-
-            (v, r, s) = signatureSplit(signatures, 0);
-            address signatureOwner = _verifySignature(v, r, s);
-
             require(sessionKey == signatureOwner, "PluserModule: Invalid session key signature");
-            require(timeoutBySessionKey[sessionKey] > block.timestamp, "PluserModule: Session key is expired");
-        } else if (to == address(owner)) {} else {
-            require(timeoutBySessionKey[sessionKey] > block.timestamp, "PluserModule: Session key is expired");
+        } else if (to == address(account)) {
+            //TODO: blacklist
+        } else {
+            require(timeoutBySessionKey[signatureOwner] > block.timestamp, "PluserModule: Session key is expired");
         }
     }
 
@@ -137,7 +142,7 @@ contract PluserModule is PluserModuleInternal, Guard {
         uint signTimestamp
     ) external {
         require(!recoveryRequest.isExist(), "RequestManager: Request already exists");
-        require(!owner.isOwner(newSessionKey), "RequestManager: Owner already exists");
+        require(!account.isOwner(newSessionKey), "RequestManager: account already exists");
         require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
 
         bytes32 structHash = keccak256(abi.encode(_CREATE_RECOVERY_REQUEST_TYPEHASH, newSessionKey, recoveryNonce++, signTimestamp));
@@ -148,7 +153,7 @@ contract PluserModule is PluserModuleInternal, Guard {
         );
 
         // slither-disable-next-line timestamp
-        recoveryRequest = Request.NewSessionKey({ newSessionKey: newSessionKey, unlockTime: block.timestamp + RECOVERY_TIME });
+        recoveryRequest = RecoveryRequest.NewSessionKey({ key: newSessionKey, unlockTime: block.timestamp + RECOVERY_TIME });
         emit RequestCreated(newSessionKey);
     }
 
@@ -159,7 +164,7 @@ contract PluserModule is PluserModuleInternal, Guard {
         uint signTimestamp
     ) external {
         require(recoveryRequest.isExist(), "RequestManager: Request not exists");
-        require(owner.isOwner(sessionKey), "RequestManager: Session key not exists");
+        require(account.isOwner(sessionKey), "RequestManager: Session key not exists");
         require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
 
         bytes32 structHash = keccak256(abi.encode(_CANCEL_RECOVERY_TYPEHASH, recoveryNonce++, signTimestamp));
@@ -169,7 +174,7 @@ contract PluserModule is PluserModuleInternal, Guard {
             "Invalid signature (verifyer)"
         );
 
-        emit RequestCanceled(recoveryRequest.sessionKey);
+        emit RequestCanceled(recoveryRequest.key);
 
         recoveryRequest.reset();
     }
@@ -180,78 +185,100 @@ contract PluserModule is PluserModuleInternal, Guard {
         require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
 
         bytes32 structHash = keccak256(abi.encode(_EXECUTE_RECOVERY_REQUEST_TYPEHASH, recoveryNonce++, signTimestamp));
-        require(ECDSA.recover(_hashTypedDataV4(structHash), authKeySignature) == sessionKey, "Invalid signature (auth key)");
+        require(ECDSA.recover(_hashTypedDataV4(structHash), authKeySignature) == authKey, "Invalid signature (auth key)");
         require(
             ECDSA.recover(_hashTypedDataV4(structHash), verifyerSignature) == factory.getTwoFactorVerifier(),
             "Invalid signature (verifyer)"
         );
 
-        address sessionKey = recoveryRequest.key;
-
-        address[] memory sessionKeys = owner.getOwners();
+        address[] memory sessionKeys = account.getOwners();
         for (uint256 i = 0; i < sessionKeys.length; i++) {
             delete timeoutBySessionKey[sessionKeys[i]];
 
             address sessionKey = sessionKeys[i];
-            address prevSessionKey;
+            address prevSessionKey = address(0x1);
             if (i != 0) {
                 prevSessionKey = sessionKeys[i - 1];
             }
 
             require(
-                owner.execTransactionFromModule(
-                    address(owner),
+                account.execTransactionFromModule(
+                    address(account),
                     0,
-                    abi.encodeCall(owner.removeOwner, (prevSessionKey, sessionKey, 1)),
+                    abi.encodeCall(account.removeOwner, (prevSessionKey, sessionKey, 1)),
                     Enum.Operation.Call
                 ),
                 "RequestManager: Remove owner failed"
             );
         }
 
+        address newSessionKey = recoveryRequest.key;
         require(
-            owner.execTransactionFromModule(
-                address(owner),
+            account.execTransactionFromModule(
+                address(account),
                 0,
-                abi.encodeCall(owner.addOwnerWithThreshold, (deviceKey, 1)),
+                abi.encodeCall(account.addOwnerWithThreshold, (newSessionKey, 1)),
                 Enum.Operation.Call
             ),
             "RequestManager: Add owner failed"
         );
 
-        timeoutBySessionKey[sessionKey] = block.timestamp + SESSION_LIFETIME;
+        timeoutBySessionKey[newSessionKey] = block.timestamp + SESSION_LIFETIME;
 
-        emit Restored(deviceKey);
+        emit Restored(newSessionKey);
         recoveryRequest.reset();
     }
 
-    function updateSession(address currentSessionKey, address newSessionKey, bytes calldata verifyerSignature) external onlyOwner {
-        require(owner.isOwner(currentSessionKey), "PluserModule: Invalid session key");
+    function updateSession(
+        address currentSessionKey,
+        address newSessionKey,
+        bytes calldata verifyerSignature,
+        uint signTimestamp
+    ) external onlyAccount {
+        require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
+        require(account.isOwner(currentSessionKey), "PluserModule: Invalid session key");
 
-        bytes32 structHash = keccak256(abi.encode(_CREATE_REQUEST_TYPEHASH, newSessionKey, recoveryNonce++));
-        require(ECDSA.recover(_hashTypedDataV4(structHash), verifyerSignature) == verifyer, "Invalid signature (verifyer)");
+        bytes32 structHash = keccak256(abi.encode(_UPDATE_SESSION_KEY_TYPEHASH, currentSessionKey, newSessionKey, signTimestamp));
+        require(
+            ECDSA.recover(_hashTypedDataV4(structHash), verifyerSignature) == factory.getTwoFactorVerifier(),
+            "Invalid signature (verifyer)"
+        );
 
         timeoutBySessionKey[newSessionKey] = block.timestamp + SESSION_LIFETIME;
         delete timeoutBySessionKey[currentSessionKey];
 
+        address[] memory owners = account.getOwners();
+
+        address prevOwner;
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == currentSessionKey) {
+                if (i == 0) {
+                    prevOwner = address(0x1);
+                } else {
+                    prevOwner = owners[i - 1];
+                }
+            }
+        }
+        require(prevOwner != address(0x0), "PluserModule: Invalid session key");
+
         require(
-            owner.execTransactionFromModule(
-                address(owner),
+            account.execTransactionFromModule(
+                address(account),
                 0,
-                abi.encodeCall(owner.removeOwner, (owners[i - 1], owners[i], 1)),
+                abi.encodeCall(account.removeOwner, (prevOwner, currentSessionKey, 1)),
                 Enum.Operation.Call
             ),
-            "PluserModule: Remove owner failed"
+            "PluserModule: Remove account failed"
         );
 
         require(
-            owner.execTransactionFromModule(
-                address(owner),
+            account.execTransactionFromModule(
+                address(account),
                 0,
-                abi.encodeCall(owner.addOwnerWithThreshold, (newSessionKey, 1)),
+                abi.encodeCall(account.addOwnerWithThreshold, (newSessionKey, 1)),
                 Enum.Operation.Call
             ),
-            "PluserModule: Add owner failed"
+            "PluserModule: Add account failed"
         );
     }
 }

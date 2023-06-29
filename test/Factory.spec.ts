@@ -6,7 +6,7 @@ import type { GnosisSafe } from "../typechain-types";
 
 describe("Factory", () => {
     const authKey: Wallet = ethers.Wallet.createRandom();
-    const deivceKey: Wallet = ethers.Wallet.createRandom();
+    const sessionKey: Wallet = ethers.Wallet.createRandom();
 
     let env: TestEnv;
 
@@ -18,19 +18,19 @@ describe("Factory", () => {
         const signatures = await authKey._signTypedData(
             {
                 name: "PluserFactory",
-                version: "1",
+                version: "1.0.0",
                 chainId: 31337,
                 verifyingContract: env.factory.address,
             },
             {
                 CreateAccount: [
                     { name: "authKey", type: "address" },
-                    { name: "deviceKey", type: "address" },
+                    { name: "sessionKey", type: "address" },
                 ],
             },
             {
                 authKey: authKey.address,
-                deviceKey: deivceKey.address,
+                sessionKey: sessionKey.address,
             },
         );
 
@@ -63,7 +63,7 @@ describe("Factory", () => {
     it("deploy with wrong signature", async () => {
         const signatures = await authKey.signMessage("wrong signature");
 
-        await expect(env.factory.deploy(authKey.address, deivceKey.address, signatures)).to.be.revertedWith("Invalid signature (authKey)");
+        await expect(env.factory.deploy(authKey.address, sessionKey.address, signatures)).to.be.revertedWith("Invalid signature (authKey)");
     });
 
     it("deploy with wrong owner", async () => {
@@ -72,7 +72,7 @@ describe("Factory", () => {
         const signatures = await authKey.signMessage("wrong signature");
 
         await expect(
-            env.factory.connect(await ethers.getSigner(accounts[1]!)).deploy(authKey.address, deivceKey.address, signatures),
+            env.factory.connect(await ethers.getSigner(accounts[1]!)).deploy(authKey.address, sessionKey.address, signatures),
         ).to.be.revertedWith("Not a deployer");
     });
 });

@@ -13,26 +13,24 @@ import "@gnosis.pm/safe-contracts/contracts/GnosisSafe.sol";
 import "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
 import "@gnosis.pm/safe-contracts/contracts/proxies/GnosisSafeProxy.sol";
 
-import "./modules/RecoveryManager.sol";
-import "./guards/TwoFactorGuard.sol";
+import "./modules/PluserModule.sol";
 import "./scripts/InitializationScriptInterface.sol";
 import "./scripts/InitializationScriptV1.sol";
 
 contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Upgradeable {
     struct StorageV1 {
         address twoFactorVerifier;
-        TwoFactorGuard twoFactorGuard;
         InitializationScriptInterface initScript;
         GnosisSafe singleton;
-        RecoveryManager singletonRecoveryManager;
+        PluserModule singletonPluserModule;
         mapping(address => bool) deployers;
     }
 
-    event AccountCreated(address indexed authKey, address account, address deviceKey, RecoveryManager recoveryManager);
+    event AccountCreated(address indexed authKey, address account, address sessionKey, PluserModule pluserModule);
 
     bytes32 internal constant _STORAGE_SLOT = bytes32(uint256(keccak256(abi.encodePacked("pluser.factory.storage.v1"))) - 1);
 
-    bytes32 private constant _CREATE_ACCOUNT_TYPEHASH = keccak256("CreateAccount(address authKey,address deviceKey)");
+    bytes32 private constant _CREATE_ACCOUNT_TYPEHASH = keccak256("CreateAccount(address authKey,address sessionKey)");
 
     modifier onlyDeployer() {
         require(_getStorage().deployers[msg.sender], "Not a deployer");
@@ -47,26 +45,21 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
     function initialize(
         InitializationScriptV1 initScript_,
         GnosisSafe singleton_,
-        RecoveryManager singletonRecoveryManager_,
+        PluserModule singletonPluserModule_,
         address twoFactorVerifier_
     ) external initializer {
         __Ownable_init();
-        __EIP712_init("PluserFactory", "1");
+        __EIP712_init("PluserFactory", "1.0.0");
 
         StorageV1 storage store = _getStorage();
 
-        store.twoFactorGuard = new TwoFactorGuard(Factory(address(this)));
         store.initScript = initScript_;
         store.singleton = singleton_;
-        store.singletonRecoveryManager = singletonRecoveryManager_;
+        store.singletonPluserModule = singletonPluserModule_;
         store.twoFactorVerifier = twoFactorVerifier_;
     }
 
     // ------ VIEW ------
-
-    function getTwoFactorGuard() external view returns (TwoFactorGuard) {
-        return _getStorage().twoFactorGuard;
-    }
 
     function getInitScript() external view returns (InitializationScriptInterface) {
         return _getStorage().initScript;
@@ -94,14 +87,15 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         _getStorage().twoFactorVerifier = twoFactorVerifier_;
     }
 
-    function deploy(address authKey, address deviceKey, bytes memory signature) external onlyDeployer returns (GnosisSafe wallet) {
+    function deploy(address authKey, address sessionKey, bytes memory signature) external onlyDeployer returns (GnosisSafe account) {
         StorageV1 storage store = _getStorage();
 
-        bytes32 structHash = keccak256(abi.encode(_CREATE_ACCOUNT_TYPEHASH, authKey, deviceKey));
-
+        // verify signatures
+        bytes32 structHash = keccak256(abi.encode(_CREATE_ACCOUNT_TYPEHASH, authKey, sessionKey));
         require(ECDSA.recover(_hashTypedDataV4(structHash), signature) == authKey, "Invalid signature (authKey)");
 
-        wallet = GnosisSafe(
+        // deploy account
+        account = GnosisSafe(
             payable(
                 Create2.deploy(
                     0,
@@ -111,23 +105,26 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
             )
         );
 
+        // deploy PluserModule
         address[] memory owners = new address[](1);
-        owners[0] = deviceKey;
+        owners[0] = sessionKey;
 
-        bytes32 saltRecoveryManager = keccak256(abi.encodePacked(wallet, authKey, store.twoFactorGuard));
-        RecoveryManager recoveryManager = RecoveryManager(
-            Clones.cloneDeterministic(address(store.singletonRecoveryManager), saltRecoveryManager)
+        PluserModule pluserModule = PluserModule(
+            Clones.cloneDeterministic(address(store.singletonPluserModule), keccak256(abi.encodePacked(account)))
         );
-        recoveryManager.initialize(wallet, authKey, store.twoFactorGuard);
 
-        emit AccountCreated(authKey, address(wallet), deviceKey, recoveryManager);
+        pluserModule.initialize(account, authKey, sessionKey);
+
+        emit AccountCreated(authKey, address(account), sessionKey, pluserModule);
+
+        // setup owners in account
 
         // TODO: move numbers to constants
-        wallet.setup(
+        account.setup(
             owners,
             1,
             address(store.initScript),
-            abi.encodeCall(InitializationScriptInterface.initializeAccount, (recoveryManager, store.twoFactorGuard)),
+            abi.encodeCall(InitializationScriptInterface.initializeAccount, (pluserModule)),
             address(0),
             address(0),
             0,

@@ -30,7 +30,7 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
             await hre.deployments.getArtifact("MinimalForwarder")
         ).bytecode,
         (
-            await hre.deployments.getArtifact("RecoveryManager")
+            await hre.deployments.getArtifact("PluserModule")
         ).bytecode,
     );
 

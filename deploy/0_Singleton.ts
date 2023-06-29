@@ -18,3 +18,5 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
         waitConfirmations: 1,
     });
 };
+
+module.exports.tags = ["localnet"];
