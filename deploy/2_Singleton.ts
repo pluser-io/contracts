@@ -1,6 +1,5 @@
 import type { HardhatRuntimeEnvironment } from "hardhat/types";
 import "@safe-global/safe-service-client";
-import { ethers } from "hardhat";
 import { Sender, getSignerAddressBySender } from "../utils/tests";
 
 module.exports = async function (hre: HardhatRuntimeEnvironment) {

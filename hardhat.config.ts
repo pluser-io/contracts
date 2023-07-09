@@ -31,11 +31,6 @@ const config: HardhatUserConfig = {
             accounts: [process.env["PRIVATE_KEY"]!],
             saveDeployments: true,
         },
-        bscTestnet: {
-            url: "https://bsc-testnet.public.blastapi.io",
-            accounts: [process.env["PRIVATE_KEY"]!],
-            saveDeployments: true,
-        },
     },
 };
 

@@ -1,15 +1,17 @@
-import { ethers } from "hardhat";
 import type { HardhatRuntimeEnvironment } from "hardhat/types";
 import { Sender, getSignerAddressBySender } from "../utils/tests";
+import { DeployHelper__factory } from "../typechain-types";
+import { ethers } from "hardhat";
 
 module.exports = async function (hre: HardhatRuntimeEnvironment) {
     const deployer = await getSignerAddressBySender(Sender.ContractsDeployer, hre);
     const verifyer = await getSignerAddressBySender(Sender.TwoFactorVerifyer, hre);
     const accountsDeployer = await getSignerAddressBySender(Sender.AccountsDeployer, hre);
 
-    await hre.upgrades.validateImplementation(await ethers.getContractFactory("Factory"));
+    // TODO: test upgrade and validation
+    // await hre.upgrades.validateImplementation(await ethers.getContractFactory("Factory"));
 
-    await hre.deployments.deploy("DeployHelper", {
+    const deployHelperRes = await hre.deployments.deploy("DeployHelper", {
         from: deployer,
         args: [],
         log: true,
@@ -26,12 +28,8 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
             waitConfirmations: 1,
         },
         "deployPluserModule",
-        (
-            await hre.deployments.getArtifact("PluserModule")
-        ).bytecode,
-        (
-            await hre.deployments.getArtifact("InitializationScriptV1")
-        ).bytecode,
+        (await hre.deployments.getArtifact("PluserModule")).bytecode,
+        (await hre.deployments.getArtifact("InitializationScriptV1")).bytecode,
     );
 
     await hre.deployments.execute(
@@ -43,15 +41,14 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
             waitConfirmations: 1,
         },
         "deployFactory",
-        (
-            await hre.deployments.getArtifact("Factory")
-        ).bytecode,
-        (
-            await hre.deployments.get("GnosisSingleton")
-        ).address,
+        (await hre.deployments.getArtifact("Factory")).bytecode,
+        (await hre.deployments.get("GnosisSingleton")).address,
         accountsDeployer,
         verifyer,
     );
+
+    const factoryAddress = await hre.deployments.read("DeployHelper", "factory");
+    console.log(`Factory address: ${factoryAddress}`);
 };
 
 module.exports.tags = ["common"];

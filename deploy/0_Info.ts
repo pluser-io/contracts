@@ -7,7 +7,7 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
     const deployer = await getSignerAddressBySender(Sender.ContractsDeployer, hre);
 
     console.log(`Deployer address: ${deployer}`);
-    const nonce = await (await ethers.getSigner(deployer)).getTransactionCount();
+    const nonce = await (await ethers.getSigner(deployer)).getNonce();
     console.log(`Nonce: ${nonce}`);
 };
 

@@ -2,6 +2,7 @@
     "name": "hardhat-project",
     "scripts": {
         "build": "hardhat compile",
+        "deploy:testnet": "hardhat deploy --network mumbai",
         "test": "hardhat test",
         "lint": "yarn lint:sol && yarn lint:ts",
         "lint:sol": "solhint 'contracts/**/*.sol'",

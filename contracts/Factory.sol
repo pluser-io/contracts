@@ -68,7 +68,7 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         return _getStorage().twoFactorVerifier;
     }
 
-    function isDeployer(address deployer) external view returns (bool) {
+    function isDeployer(address deployer) public view returns (bool) {
         return _getStorage().deployers[deployer];
     }
 
@@ -86,12 +86,13 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         _getStorage().twoFactorVerifier = twoFactorVerifier_;
     }
 
-    function deploy(address authKey, address sessionKey, bytes memory signature) external onlyDeployer returns (GnosisSafe account) {
+    function deploy(address authKey, address sessionKey, bytes calldata signature, bytes calldata deployerSignature) external returns (GnosisSafe account) {
         StorageV1 storage store = _getStorage();
 
         // verify signatures
         bytes32 structHash = keccak256(abi.encode(_CREATE_ACCOUNT_TYPEHASH, authKey, sessionKey));
         require(ECDSA.recover(_hashTypedDataV4(structHash), signature) == authKey, "Invalid signature (authKey)");
+        require(isDeployer(ECDSA.recover(_hashTypedDataV4(structHash), deployerSignature)), "Invalid signature (deployer)");
 
         // deploy account
         account = GnosisSafe(
