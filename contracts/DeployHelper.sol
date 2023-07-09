@@ -12,7 +12,7 @@ import "./modules/PluserModule.sol";
 import "./scripts/InitializationScriptV1.sol";
 import "./Factory.sol";
 
-contract Deploy is Ownable {
+contract DeployHelper is Ownable {
     PluserModule public singeltonPluserModule;
     InitializationScriptInterface public initScript;
 

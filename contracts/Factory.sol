@@ -29,8 +29,7 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
     event AccountCreated(address indexed authKey, address account, address sessionKey, PluserModule pluserModule);
 
     bytes32 internal constant _STORAGE_SLOT = bytes32(uint256(keccak256(abi.encodePacked("pluser.factory.storage.v1"))) - 1);
-
-    bytes32 private constant _CREATE_ACCOUNT_TYPEHASH = keccak256("CreateAccount(address authKey,address sessionKey)");
+    bytes32 internal constant _CREATE_ACCOUNT_TYPEHASH = keccak256("CreateAccount(address authKey,address sessionKey)");
 
     modifier onlyDeployer() {
         require(_getStorage().deployers[msg.sender], "Not a deployer");
@@ -113,7 +112,7 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
             Clones.cloneDeterministic(address(store.singletonPluserModule), keccak256(abi.encodePacked(account)))
         );
 
-        pluserModule.initialize(account, authKey, sessionKey);
+        pluserModule.initialize(account, authKey, sessionKey, this);
 
         emit AccountCreated(authKey, address(account), sessionKey, pluserModule);
 

@@ -1,8 +1,11 @@
 import { keccak256 } from "ethers/lib/utils";
 import { deployments, ethers } from "hardhat";
-import type { Deploy, Factory, GnosisSafe, PluserModule } from "../typechain-types";
+import { Signer } from "ethers";
+import { GnosisSafe__factory, type DeployHelper, type Factory, type GnosisSafe, type PluserModule } from "../typechain-types";
 import type { Event, Wallet } from "ethers";
 import { assert } from "chai";
+import { HardhatRuntimeEnvironment } from "hardhat/types";
+import { Deploy } from "../typechain-types/contracts/Deploy";
 
 enum GnosisOperation {
     CALL = 0,
@@ -17,19 +20,105 @@ type TestEnv = {
 type DeployedAccountInfo = {
     account: GnosisSafe;
     pluserModule: PluserModule;
+    accountCreatedEvent: {
+        authKey: string;
+        account: string;
+        sessionKey: string;
+        pluserModule: string;
+    };
+    guard: string;
+};
+
+export enum Sender {
+    ContractsDeployer,
+    TwoFactorVerifyer,
+    AccountsDeployer,
+    User,
+}
+
+export const getSignerAddressBySender = async (sender: Sender, hre: HardhatRuntimeEnvironment): Promise<string> => {
+    const signers = await ethers.getSigners();
+    let address;
+
+    switch (sender) {
+        case Sender.ContractsDeployer:
+            if (signers.length <= 0 || !signers[0]) {
+                throw new Error("invalid signer");
+            }
+
+            address = await signers[0].getAddress();
+            break;
+        case Sender.TwoFactorVerifyer:
+            if (hre.network.name === "hardhat") {
+                const signer = await getTestnetSignerBySender(Sender.TwoFactorVerifyer);
+                address = await signer.getAddress();
+            } else {
+                address = process.env["TWO_FACTOR_VERIFYER"];
+            }
+
+            break;
+        case Sender.AccountsDeployer:
+            if (hre.network.name === "hardhat") {
+                const signer = await getTestnetSignerBySender(Sender.AccountsDeployer);
+                address = await signer.getAddress();
+            } else {
+                address = process.env["ACCOUNTS_DEPLOYER"];
+            }
+            break;
+        default:
+            throw new Error("invalid sender address");
+    }
+
+    if (!address) {
+        throw new Error("invalid sender address");
+    }
+    return address;
+};
+
+export const getTestnetSignerBySender = async (sender: Sender): Promise<Signer> => {
+    const signers = await ethers.getSigners();
+
+    let i = 0;
+    switch (sender) {
+        case Sender.ContractsDeployer:
+            i = 0;
+            break;
+        case Sender.TwoFactorVerifyer:
+            i = 1;
+            break;
+        case Sender.AccountsDeployer:
+            i = 2;
+            break;
+        case Sender.User:
+            i = 3;
+            break;
+        default:
+            throw new Error("invalid sender");
+    }
+
+    if (signers.length <= i) {
+        throw new Error("invalid signer");
+    }
+
+    const signer = signers[i];
+    if (!signer) {
+        throw new Error("invalid signer");
+    }
+
+    return signer;
 };
 
 const setupTestEnv = async () =>
     deployments.createFixture(async ({ deployments, ethers }): Promise<TestEnv> => {
-        process.env = {
-            ...process.env,
-            ACCOUNT_DEPLOYER: (await ethers.getSigners())[0]!.address,
-        };
         await deployments.fixture();
 
-        const deploy = (await ethers.getContractAt("Deploy", (await deployments.get("Deploy")).address)) as Deploy;
+        const signer = await getTestnetSignerBySender(Sender.AccountsDeployer);
 
-        const factory = (await ethers.getContractAt("Factory", await deploy.factory())) as Factory;
+        const deploy = (await ethers.getContractAt("DeployHelper", (await deployments.get("DeployHelper")).address)).connect(
+            signer,
+        ) as DeployHelper;
+
+        const factory = (await ethers.getContractAt("Factory", await deploy.factory())).connect(signer) as Factory;
 
         return {
             factory: factory,
@@ -73,6 +162,23 @@ const deployAccount = async (accountAuthKey: Wallet, accountDeivceKey: Wallet, f
         pluserModule: pluserModule,
     };
 
+    const gnosisInterface = GnosisSafe__factory.createInterface();
+    const changedGuard = res.events!.find((event: Event) => {
+        const changedGuardEventTopic = gnosisInterface.getEventTopic("ChangedGuard");
+        if (event.topics[0] === changedGuardEventTopic) {
+            return true;
+        }
+    });
+
+    let guard = ethers.constants.AddressZero;
+    if (changedGuard) {
+        const log = gnosisInterface.parseLog({
+            topics: changedGuard.topics,
+            data: changedGuard.data,
+        });
+        guard = log.args["guard"];
+    }
+
     assert(sessionKey.toLowerCase() === accountDeivceKey.address.toLowerCase());
 
     const accountContract = (await ethers.getContractAt("GnosisSafe", accountCreatedEvent.account)) as GnosisSafe;
@@ -81,6 +187,8 @@ const deployAccount = async (accountAuthKey: Wallet, accountDeivceKey: Wallet, f
     return {
         account: accountContract,
         pluserModule: pluserModuleContract,
+        accountCreatedEvent: accountCreatedEvent,
+        guard: guard,
     };
 };
 
@@ -108,4 +216,22 @@ const setNextTime = async (time: number) => {
     await ethers.provider.send("evm_mine", []);
 };
 
-export { GnosisOperation, TestEnv, DeployedAccountInfo, concatSignatures, signGnosisSafe, deployAccount, setupTestEnv, setNextTime };
+const getLastTimestamp = async (): Promise<number> => {
+    const provider = (await getTestnetSignerBySender(Sender.User)).provider!;
+    const blockNumber = await provider.getBlockNumber();
+    const block = await provider.getBlock(blockNumber);
+
+    return block.timestamp;
+};
+
+export {
+    GnosisOperation,
+    TestEnv,
+    DeployedAccountInfo,
+    concatSignatures,
+    signGnosisSafe,
+    deployAccount,
+    setupTestEnv,
+    setNextTime,
+    getLastTimestamp,
+};

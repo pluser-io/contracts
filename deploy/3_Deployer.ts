@@ -1,15 +1,15 @@
 import { ethers } from "hardhat";
 import type { HardhatRuntimeEnvironment } from "hardhat/types";
-import { Deploy__factory } from "../typechain-types";
+import { Sender, getSignerAddressBySender } from "../utils/tests";
 
 module.exports = async function (hre: HardhatRuntimeEnvironment) {
-    const accounts = await hre.getUnnamedAccounts();
-    const deployer = accounts[0]!;
-    const verifyer = accounts[0]!;
+    const deployer = await getSignerAddressBySender(Sender.ContractsDeployer, hre);
+    const verifyer = await getSignerAddressBySender(Sender.TwoFactorVerifyer, hre);
+    const accountsDeployer = await getSignerAddressBySender(Sender.AccountsDeployer, hre);
 
     await hre.upgrades.validateImplementation(await ethers.getContractFactory("Factory"));
 
-    const deploy = await hre.deployments.deploy("Deploy", {
+    await hre.deployments.deploy("DeployHelper", {
         from: deployer,
         args: [],
         log: true,
@@ -18,33 +18,16 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
     });
 
     await hre.deployments.execute(
-        "Deploy",
+        "DeployHelper",
         {
             from: deployer,
             log: true,
             autoMine: true,
             waitConfirmations: 1,
         },
-        "step1",
-        (
-            await hre.deployments.getArtifact("MinimalForwarder")
-        ).bytecode,
+        "deployPluserModule",
         (
             await hre.deployments.getArtifact("PluserModule")
-        ).bytecode,
-    );
-
-    await hre.deployments.execute(
-        "Deploy",
-        {
-            from: deployer,
-            log: true,
-            autoMine: true,
-            waitConfirmations: 1,
-        },
-        "step2",
-        (
-            await hre.deployments.getArtifact("GnosisSafe")
         ).bytecode,
         (
             await hre.deployments.getArtifact("InitializationScriptV1")
@@ -52,20 +35,23 @@ module.exports = async function (hre: HardhatRuntimeEnvironment) {
     );
 
     await hre.deployments.execute(
-        "Deploy",
+        "DeployHelper",
         {
             from: deployer,
             log: true,
             autoMine: true,
             waitConfirmations: 1,
         },
-        "step3",
+        "deployFactory",
         (
             await hre.deployments.getArtifact("Factory")
         ).bytecode,
-        process.env["ACCOUNT_DEPLOYER"]!,
+        (
+            await hre.deployments.get("GnosisSingleton")
+        ).address,
+        accountsDeployer,
         verifyer,
     );
-
-    console.log("Forwarder:", await Deploy__factory.connect(deploy.address, ethers.provider).forwarder());
 };
+
+module.exports.tags = ["common"];

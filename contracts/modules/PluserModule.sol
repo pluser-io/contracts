@@ -19,11 +19,6 @@ contract PluserModuleState {
     uint256 public constant RECOVERY_TIME = 3 days;
     uint256 public constant SIGNATURE_LIFETIME = 15 minutes;
 
-    // --------------- Events ---------------
-    event RequestCreated(address newSessionKey);
-    event RequestCanceled(address sessionKey);
-    event Restored(address newSessionKey);
-
     // --------------- Typehashes ---------------
     bytes32 internal constant _CREATE_RECOVERY_REQUEST_TYPEHASH =
         keccak256("CreateRecoveryRequest(address newSessionKey,uint256 nonce,uint256 signTimestamp)");
@@ -32,10 +27,15 @@ contract PluserModuleState {
     bytes32 internal constant _UPDATE_SESSION_KEY_TYPEHASH =
         keccak256("UpdateSessionKey(address sessionKey,address newSessionKey,uint256 signTimestamp)");
 
+    // --------------- Events ---------------
+    event RequestCreated(address newSessionKey);
+    event RequestCanceled(address sessionKey);
+    event Restored(address newSessionKey);
+
     // --------------- Global vars ---------------
     GnosisSafe public account;
-    Factory public factory;
     address public authKey;
+    Factory public factory;
 
     mapping(address => uint) public timeoutBySessionKey;
 
@@ -72,11 +72,12 @@ contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
         _disableInitializers();
     }
 
-    function initialize(GnosisSafe account_, address authKey_, address sessionKey_) external initializer {
-        __EIP712_init("PluserModule", "0.9.0");
+    function initialize(GnosisSafe account_, address authKey_, address sessionKey_, Factory factory_) external initializer {
+        __EIP712_init("PluserModule", "0.0.369");
 
         account = account_;
         authKey = authKey_;
+        factory = factory_;
 
         timeoutBySessionKey[sessionKey_] = block.timestamp + SESSION_LIFETIME;
     }
