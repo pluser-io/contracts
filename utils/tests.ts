@@ -1,33 +1,7 @@
-import { keccak256 } from "ethers/lib/utils";
-import { deployments, ethers } from "hardhat";
-import { Signer } from "ethers";
-import { GnosisSafe__factory, type DeployHelper, type Factory, type GnosisSafe, type PluserModule } from "../typechain-types";
-import type { Event, Wallet } from "ethers";
-import { assert } from "chai";
+import { deployments } from "hardhat";
+import { ethers as hardhatEthers } from "hardhat";
+import { type DeployHelper, type Factory } from "../typechain-types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { Deploy } from "../typechain-types/contracts/Deploy";
-
-enum GnosisOperation {
-    CALL = 0,
-    DELEGATECALL = 1,
-}
-
-type TestEnv = {
-    factory: Factory;
-    deploy: Deploy;
-};
-
-type DeployedAccountInfo = {
-    account: GnosisSafe;
-    pluserModule: PluserModule;
-    accountCreatedEvent: {
-        authKey: string;
-        account: string;
-        sessionKey: string;
-        pluserModule: string;
-    };
-    guard: string;
-};
 
 export enum Sender {
     ContractsDeployer,
@@ -36,8 +10,13 @@ export enum Sender {
     User,
 }
 
+export type TestEnv = {
+    factory: Factory;
+    deploy: DeployHelper;
+};
+
 export const getSignerAddressBySender = async (sender: Sender, hre: HardhatRuntimeEnvironment): Promise<string> => {
-    const signers = await ethers.getSigners();
+    const signers = await hardhatEthers.getSigners();
     let address;
 
     switch (sender) {
@@ -75,8 +54,8 @@ export const getSignerAddressBySender = async (sender: Sender, hre: HardhatRunti
     return address;
 };
 
-export const getTestnetSignerBySender = async (sender: Sender): Promise<Signer> => {
-    const signers = await ethers.getSigners();
+export const getTestnetSignerBySender = async (sender: Sender): Promise<hardhatEthers.Signer> => {
+    const signers = await hardhatEthers.getSigners();
 
     let i = 0;
     switch (sender) {
@@ -108,23 +87,25 @@ export const getTestnetSignerBySender = async (sender: Sender): Promise<Signer> 
     return signer;
 };
 
-const setupTestEnv = async () =>
-    deployments.createFixture(async ({ deployments, ethers }): Promise<TestEnv> => {
+export const setupTestEnv = async () =>
+    deployments.createFixture(async ({ deployments }): Promise<TestEnv> => {
         await deployments.fixture();
 
         const signer = await getTestnetSignerBySender(Sender.AccountsDeployer);
 
-        const deploy = (await ethers.getContractAt("DeployHelper", (await deployments.get("DeployHelper")).address)).connect(
+        const deploy = (await hardhatEthers.getContractAt("DeployHelper", (await deployments.get("DeployHelper")).address)).connect(
             signer,
         ) as DeployHelper;
 
-        const factory = (await ethers.getContractAt("Factory", await deploy.factory())).connect(signer) as Factory;
+        const factory = (await hardhatEthers.getContractAt("Factory", await deploy.factory())).connect(signer) as Factory;
 
         return {
             factory: factory,
             deploy: deploy,
         };
     })();
+
+/*
 
 const deployAccount = async (accountAuthKey: Wallet, accountDeivceKey: Wallet, factory: Factory): Promise<DeployedAccountInfo> => {
     const signatures = await accountAuthKey._signTypedData(
@@ -235,3 +216,4 @@ export {
     setNextTime,
     getLastTimestamp,
 };
+*/

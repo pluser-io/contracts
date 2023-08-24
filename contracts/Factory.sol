@@ -59,7 +59,6 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
     }
 
     // ------ VIEW ------
-
     function getInitScript() external view returns (InitializationScriptInterface) {
         return _getStorage().initScript;
     }
@@ -73,7 +72,6 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
     }
 
     // ------ MUTABLE ------
-
     function addDeployer(address deployer) external onlyOwner {
         _getStorage().deployers[deployer] = true;
     }

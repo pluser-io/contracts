@@ -15,7 +15,6 @@ import "../Factory.sol";
 
 contract PluserModuleState {
     // --------------- Constants ---------------
-    uint256 public constant SESSION_LIFETIME = 1 hours;
     uint256 public constant RECOVERY_TIME = 3 days;
     uint256 public constant SIGNATURE_LIFETIME = 15 minutes;
 
@@ -24,8 +23,6 @@ contract PluserModuleState {
         keccak256("CreateRecoveryRequest(address newSessionKey,uint256 nonce,uint256 signTimestamp)");
     bytes32 internal constant _CANCEL_RECOVERY_TYPEHASH = keccak256("CancelRecovery(uint256 nonce,uint256 signTimestamp)");
     bytes32 internal constant _EXECUTE_RECOVERY_REQUEST_TYPEHASH = keccak256("ExecuteRecoveryRequest(uint256 nonce,uint256 signTimestamp)");
-    bytes32 internal constant _UPDATE_SESSION_KEY_TYPEHASH =
-        keccak256("UpdateSessionKey(address sessionKey,address newSessionKey,uint256 signTimestamp)");
 
     // --------------- Events ---------------
     event RequestCreated(address newSessionKey);
@@ -37,27 +34,58 @@ contract PluserModuleState {
     address public authKey;
     Factory public factory;
 
-    mapping(address => uint) public timeoutBySessionKey;
-
     uint256 public recoveryNonce;
     RecoveryRequest.NewSessionKey public recoveryRequest;
 }
 
-contract PluserModuleInternal is SignatureDecoder, PluserModuleState {
-    function _verifySignature(bytes32 dataHash, uint8 v, bytes32 r, bytes32 s) internal pure returns (address currentAccount) {
-        if (v > 30) {
-            currentAccount = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash)), v - 4, r, s);
-        } else {
-            currentAccount = ecrecover(dataHash, v, r, s);
-        }
+contract PluserGuard is PluserModuleState, SignatureDecoder, EIP712Upgradeable, Guard {
+    using RecoveryRequest for RecoveryRequest.NewSessionKey;
 
-        require(currentAccount != address(0), "PluserModule: Invalid signature");
+    function checkTransaction(
+        address to,
+        uint256 value,
+        bytes calldata data,
+        Enum.Operation operation,
+        uint256 safeTxGas,
+        uint256 baseGas,
+        uint256 gasPrice,
+        address gasToken,
+        address payable refundReceiver,
+        bytes memory signatures,
+        address /* msgSender */
+    ) external view {
+        require(operation == Enum.Operation.Call, "TwoFactorGuard: Only calls are allowed");
 
-        return currentAccount;
+        require(msg.sender == address(account), "TwoFactorGuard: Invalid sender"); //TODO: msg.sender or  address /* msgSender */?
+        require(!recoveryRequest.isExist(), "TwoFactorGuard: Account isn't active");
+
+        bytes32 txHash = account.getTransactionHash(
+            to,
+            value,
+            data,
+            operation,
+            safeTxGas,
+            baseGas,
+            gasPrice,
+            gasToken,
+            refundReceiver,
+            account.nonce() - 1
+        );
+
+        // get verifyer signature
+        uint256 lastSigIndex = account.getThreshold();
+        (uint8 v, bytes32 r, bytes32 s) = signatureSplit(signatures, lastSigIndex);
+
+        // check verifyer signature
+        require(ECDSA.recover(txHash, v, r, s) == factory.getTwoFactorVerifier(), "Invalid signature (authKey)");
+    }
+
+    function checkAfterExecution(bytes32 /*txHash*/, bool /*success*/) external pure {
+        return;
     }
 }
 
-contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
+contract PluserModule is PluserModuleState, EIP712Upgradeable {
     using RecoveryRequest for RecoveryRequest.NewSessionKey;
 
     // --------------- Modifiers ---------------
@@ -78,61 +106,6 @@ contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
         account = account_;
         authKey = authKey_;
         factory = factory_;
-
-        timeoutBySessionKey[sessionKey_] = block.timestamp + SESSION_LIFETIME;
-    }
-
-    // --------------- View functions ---------------
-    function checkTransaction(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        Enum.Operation operation,
-        uint256 safeTxGas,
-        uint256 baseGas,
-        uint256 gasPrice,
-        address gasToken,
-        address payable refundReceiver,
-        bytes memory signatures,
-        address /* msgSender */
-    ) external view {
-        require(operation == Enum.Operation.Call, "TwoFactorGuard: Only calls are allowed");
-
-        require(msg.sender == address(account), "TwoFactorGuard: Invalid sender"); //TODO: msg.sender or  address /* msgSender */?
-
-        bytes32 txHash = account.getTransactionHash(
-            to,
-            value,
-            data,
-            operation,
-            safeTxGas,
-            baseGas,
-            gasPrice,
-            gasToken,
-            refundReceiver,
-            account.nonce() - 1
-        );
-
-        address signatureOwner;
-        {
-            (uint8 v, bytes32 r, bytes32 s) = signatureSplit(signatures, 0);
-            signatureOwner = _verifySignature(txHash, v, r, s);
-        }
-
-        if (to == address(this)) {
-            bytes4 selector = bytes4(data[0:4]);
-            require(selector == PluserModule.updateSession.selector, "PluserModule: Invalid selector");
-            address sessionKey = abi.decode(data[16:36], (address));
-            require(sessionKey == signatureOwner, "PluserModule: Invalid session key signature");
-        } else if (to == address(account)) {
-            //TODO: blacklist
-        } else {
-            require(timeoutBySessionKey[signatureOwner] > block.timestamp, "PluserModule: Session key is expired");
-        }
-    }
-
-    function checkAfterExecution(bytes32 /*txHash*/, bool /*success*/) external pure {
-        return;
     }
 
     // --------------- Public mutable functions ---------------
@@ -158,28 +131,18 @@ contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
         emit RequestCreated(newSessionKey);
     }
 
-    function cancelRecovery(
-        address sessionKey,
-        bytes calldata sessionKeySignature,
-        bytes calldata verifyerSignature,
-        uint signTimestamp
-    ) external {
+    function cancelRecovery(bytes calldata authKeySignature, uint signTimestamp) external onlyAccount {
         require(recoveryRequest.isExist(), "RequestManager: Request not exists");
-        require(account.isOwner(sessionKey), "RequestManager: Session key not exists");
         require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
 
         bytes32 structHash = keccak256(abi.encode(_CANCEL_RECOVERY_TYPEHASH, recoveryNonce++, signTimestamp));
-        require(ECDSA.recover(_hashTypedDataV4(structHash), sessionKeySignature) == sessionKey, "Invalid signature (session key)");
-        require(
-            ECDSA.recover(_hashTypedDataV4(structHash), verifyerSignature) == factory.getTwoFactorVerifier(),
-            "Invalid signature (verifyer)"
-        );
-
-        emit RequestCanceled(recoveryRequest.key);
+        require(ECDSA.recover(_hashTypedDataV4(structHash), authKeySignature) == authKey, "Invalid signature (auth key)");
 
         recoveryRequest.reset();
+        emit RequestCanceled(recoveryRequest.key);
     }
 
+    /*
     function executeRecoveryRequest(bytes calldata authKeySignature, bytes calldata verifyerSignature, uint signTimestamp) external {
         require(recoveryRequest.isExist(), "RequestManager: Request not exists");
         require(recoveryRequest.isUnlocked(), "RequestManager: Request not unlocked");
@@ -228,58 +191,5 @@ contract PluserModule is PluserModuleInternal, EIP712Upgradeable, Guard {
 
         emit Restored(newSessionKey);
         recoveryRequest.reset();
-    }
-
-    function updateSession(
-        address currentSessionKey,
-        address newSessionKey,
-        bytes calldata verifyerSignature,
-        uint signTimestamp
-    ) external onlyAccount {
-        require(signTimestamp + SIGNATURE_LIFETIME > block.timestamp, "RequestManager: Signature is expired");
-        require(account.isOwner(currentSessionKey), "PluserModule: Invalid session key");
-
-        bytes32 structHash = keccak256(abi.encode(_UPDATE_SESSION_KEY_TYPEHASH, currentSessionKey, newSessionKey, signTimestamp));
-        require(
-            ECDSA.recover(_hashTypedDataV4(structHash), verifyerSignature) == factory.getTwoFactorVerifier(),
-            "Invalid signature (verifyer)"
-        );
-
-        timeoutBySessionKey[newSessionKey] = block.timestamp + SESSION_LIFETIME;
-        delete timeoutBySessionKey[currentSessionKey];
-
-        address[] memory owners = account.getOwners();
-
-        address prevOwner;
-        for (uint256 i = 0; i < owners.length; i++) {
-            if (owners[i] == currentSessionKey) {
-                if (i == 0) {
-                    prevOwner = address(0x1);
-                } else {
-                    prevOwner = owners[i - 1];
-                }
-            }
-        }
-        require(prevOwner != address(0x0), "PluserModule: Invalid session key");
-
-        require(
-            account.execTransactionFromModule(
-                address(account),
-                0,
-                abi.encodeCall(account.removeOwner, (prevOwner, currentSessionKey, 1)),
-                Enum.Operation.Call
-            ),
-            "PluserModule: Remove account failed"
-        );
-
-        require(
-            account.execTransactionFromModule(
-                address(account),
-                0,
-                abi.encodeCall(account.addOwnerWithThreshold, (newSessionKey, 1)),
-                Enum.Operation.Call
-            ),
-            "PluserModule: Add account failed"
-        );
-    }
+    }*/
 }
