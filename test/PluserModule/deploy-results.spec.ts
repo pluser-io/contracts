@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { getTestnetSignerBySender, Sender, setupTestEnv, TestEnv } from "../../utils/tests";
 
-describe("RecoveryManager: deploy results", () => {
+describe("PluserModule: deploy results", () => {
     let env: TestEnv;
 
     beforeEach(async () => {

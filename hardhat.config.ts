@@ -21,11 +21,6 @@ const config: HardhatUserConfig = {
         hardhat: {
             saveDeployments: false,
         },
-        sepolia: {
-            url: "https://rpc2.sepolia.org",
-            accounts: [process.env["PRIVATE_KEY"]!],
-            saveDeployments: true,
-        },
         mumbai: {
             url: "https://rpc.ankr.com/polygon_mumbai",
             accounts: [process.env["PRIVATE_KEY"]!],

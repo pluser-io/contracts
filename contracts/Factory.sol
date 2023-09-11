@@ -58,6 +58,19 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         store.twoFactorVerifier = twoFactorVerifier_;
     }
 
+    // ------ PRIVATE ------
+
+    // solhint-disable-next-line no-empty-blocks
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    //slither-disable-next-line assembly
+    function _getStorage() private pure returns (StorageV1 storage store) {
+        bytes32 position = _STORAGE_SLOT;
+        assembly {
+            store.slot := position
+        }
+    }
+
     // ------ VIEW ------
     function getInitScript() external view returns (InitializationScriptInterface) {
         return _getStorage().initScript;
@@ -84,7 +97,12 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
         _getStorage().twoFactorVerifier = twoFactorVerifier_;
     }
 
-    function deploy(address authKey, address sessionKey, bytes calldata signature, bytes calldata deployerSignature) external returns (GnosisSafe account) {
+    function deploy(
+        address authKey,
+        address sessionKey,
+        bytes calldata signature,
+        bytes calldata deployerSignature
+    ) external returns (GnosisSafe account) {
         StorageV1 storage store = _getStorage();
 
         // verify signatures
@@ -128,16 +146,5 @@ contract Factory is Initializable, UUPSUpgradeable, OwnableUpgradeable, EIP712Up
             0,
             payable(address(0))
         );
-    }
-
-    // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
-
-    //slither-disable-next-line assembly
-    function _getStorage() private pure returns (StorageV1 storage store) {
-        bytes32 position = _STORAGE_SLOT;
-        assembly {
-            store.slot := position
-        }
     }
 }

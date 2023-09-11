@@ -1,4 +1,4 @@
-import { Factory, GnosisSafe, PluserModule } from "../typechain-types";
+import { Factory, GnosisSafe, GnosisSafe__factory, PluserModule, PluserModule__factory } from "../typechain-types";
 import { ethers } from "ethers";
 
 export enum GnosisSafeOperation {
@@ -18,14 +18,14 @@ export type DeployedAccountInfo = {
     };
 };
 
-const CREATE_ACCOUNT_TYPE = {
+export const CREATE_ACCOUNT_TYPE = {
     CreateAccount: [
         { name: "authKey", type: "address" },
         { name: "sessionKey", type: "address" },
     ],
 };
 
-const EXECUTE_TRANSACTION_TYPE = {
+export const EXECUTE_TRANSACTION_TYPE = {
     SafeTx: [
         { name: "to", type: "address" },
         { name: "value", type: "uint256" },
@@ -40,8 +40,16 @@ const EXECUTE_TRANSACTION_TYPE = {
     ],
 };
 
-const CREATE_RECOVERY_REQUEST_TYPE = {
+export const CREATE_RECOVERY_REQUEST_TYPE = {
     CreateRecoveryRequest: [
+        { name: "newSessionKey", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "signTimestamp", type: "uint256" },
+    ],
+};
+
+export const EXECUTE_RECOVERY_REQUEST_TYPE = {
+    ExecuteRecoveryRequest: [
         { name: "newSessionKey", type: "address" },
         { name: "nonce", type: "uint256" },
         { name: "signTimestamp", type: "uint256" },
@@ -51,17 +59,17 @@ const CREATE_RECOVERY_REQUEST_TYPE = {
 export class PluserClient {
     public account: GnosisSafe | undefined;
     public pluserModule: PluserModule | undefined;
-    public authKey: ethers.Wallet | undefined;
-    public sessionKey: ethers.Wallet | undefined;
+    public authKey: ethers.HDNodeWallet | undefined;
+    public sessionKey: ethers.HDNodeWallet | undefined;
 
-    private _factoryTypedData: ethers.TypedDataDomain = {};
-    private _accountTypedData: ethers.TypedDataDomain = {};
-    private _pluserModuleTypedData: ethers.TypedDataDomain = {};
+    public factoryTypedData: ethers.TypedDataDomain = {};
+    public accountTypedData: ethers.TypedDataDomain = {};
+    public pluserModuleTypedData: ethers.TypedDataDomain = {};
 
     constructor(private _factory: Factory) {
         this._factory.getAddress().then(
             (address) =>
-                (this._factoryTypedData = {
+                (this.factoryTypedData = {
                     name: "PluserFactory",
                     version: "1.0.0",
                     chainId: 31337,
@@ -71,16 +79,16 @@ export class PluserClient {
     }
 
     async deployAccount(
-        userAuthKey: ethers.Wallet,
-        userSessionKey: ethers.Wallet,
-        deployerKey: ethers.Wallet,
+        userAuthKey: ethers.HDNodeWallet,
+        userSessionKey: ethers.HDNodeWallet,
+        deployerKey: ethers.HDNodeWallet,
     ): Promise<DeployedAccountInfo> {
-        const accountSignature = await userAuthKey.signTypedData(this._factoryTypedData, CREATE_ACCOUNT_TYPE, {
+        const accountSignature = await userAuthKey.signTypedData(this.factoryTypedData, CREATE_ACCOUNT_TYPE, {
             authKey: userAuthKey.address,
             sessionKey: userSessionKey.address,
         });
 
-        const deployerSignature = await deployerKey.signTypedData(this._factoryTypedData, CREATE_ACCOUNT_TYPE, {
+        const deployerSignature = await deployerKey.signTypedData(this.factoryTypedData, CREATE_ACCOUNT_TYPE, {
             authKey: userAuthKey.address,
             sessionKey: userSessionKey.address,
         });
@@ -96,7 +104,13 @@ export class PluserClient {
             data: accountCreatedLog!.data,
         })!.args;
 
-        const { account, pluserModule, authKey, sessionKey } = accountCreatedLogArgs;
+        const { authKey, sessionKey } = accountCreatedLogArgs;
+
+        const accountAddress = accountCreatedLogArgs.getValue("account");
+        const pluserModuleAddress = accountCreatedLogArgs.getValue("pluserModule");
+
+        const account = GnosisSafe__factory.connect(accountAddress, deployerKey);
+        const pluserModule = PluserModule__factory.connect(pluserModuleAddress, deployerKey);
 
         await this.setAccount(authKey, sessionKey, account, pluserModule);
 
@@ -105,26 +119,26 @@ export class PluserClient {
             pluserModule: pluserModule,
             txResult: createTransactionResponse!,
             accountCreatedEvent: {
-                account: account,
+                account: accountAddress,
                 authKey: authKey,
                 sessionKey: sessionKey,
-                pluserModule: pluserModule,
+                pluserModule: pluserModuleAddress,
             },
         };
     }
 
-    async setAccount(authKey: ethers.Wallet, sessionKey: ethers.Wallet, account: GnosisSafe, pluserModule: PluserModule) {
+    async setAccount(authKey: ethers.HDNodeWallet, sessionKey: ethers.HDNodeWallet, account: GnosisSafe, pluserModule: PluserModule) {
         this.account = account;
         this.pluserModule = pluserModule;
         this.sessionKey = sessionKey;
         this.authKey = authKey;
 
-        this._accountTypedData = {
+        this.accountTypedData = {
             chainId: 31337,
             verifyingContract: await account.getAddress(),
         };
 
-        this._pluserModuleTypedData = {
+        this.pluserModuleTypedData = {
             chainId: 31337,
             name: "PluserModule",
             version: "0.0.369",
@@ -132,7 +146,7 @@ export class PluserClient {
         };
     }
 
-    async signAndsendTransaction(
+    async signAndSendTransaction(
         to: string,
         value: ethers.BigNumberish,
         data: string,
@@ -143,7 +157,7 @@ export class PluserClient {
         gasToken: string,
         refundReceiver: string,
         nonce: ethers.BigNumberish,
-        verifyerKey: ethers.Wallet,
+        verifyerKey: ethers.HDNodeWallet,
     ): Promise<ethers.ContractTransactionReceipt> {
         if (!this.account) {
             throw new Error("Account not set");
@@ -163,11 +177,11 @@ export class PluserClient {
         };
 
         const accountSignature = ethers.Signature.from(
-            await this.authKey!.signTypedData(this._accountTypedData, EXECUTE_TRANSACTION_TYPE, typehashValue),
+            await this.authKey!.signTypedData(this.accountTypedData, EXECUTE_TRANSACTION_TYPE, typehashValue),
         );
 
         const verifyerSignature = ethers.Signature.from(
-            await verifyerKey.signTypedData(this._accountTypedData, EXECUTE_TRANSACTION_TYPE, typehashValue),
+            await verifyerKey.signTypedData(this.accountTypedData, EXECUTE_TRANSACTION_TYPE, typehashValue),
         );
 
         const tx = await this.account.execTransaction(
@@ -186,19 +200,18 @@ export class PluserClient {
         return (await tx.wait())!;
     }
 
-    async createRecoveryRequest(newSessionKey: ethers.AddressLike, verifyerKey: ethers.Wallet): Promise<ethers.ContractTransactionReceipt> {
+    async createRecoveryRequest(
+        newSessionKey: ethers.AddressLike,
+        verifyerKey: ethers.HDNodeWallet,
+    ): Promise<ethers.ContractTransactionReceipt> {
         const signTimestamp = Math.floor(Date.now() / 1000);
         const typehashValue = {
             newSessionKey: newSessionKey,
             nonce: await this.pluserModule!.recoveryNonce(),
             signTimestamp: signTimestamp,
         };
-        const authKeySignature = await this.authKey!.signTypedData(
-            this._pluserModuleTypedData,
-            CREATE_RECOVERY_REQUEST_TYPE,
-            typehashValue,
-        );
-        const verifyerSignature = await verifyerKey.signTypedData(this._pluserModuleTypedData, CREATE_RECOVERY_REQUEST_TYPE, typehashValue);
+        const authKeySignature = await this.authKey!.signTypedData(this.pluserModuleTypedData, CREATE_RECOVERY_REQUEST_TYPE, typehashValue);
+        const verifyerSignature = await verifyerKey.signTypedData(this.pluserModuleTypedData, CREATE_RECOVERY_REQUEST_TYPE, typehashValue);
 
         const tx = await this.pluserModule!.createRecoveryRequest(newSessionKey, authKeySignature, verifyerSignature, signTimestamp);
 
@@ -206,7 +219,7 @@ export class PluserClient {
     }
 
     /*
-    async cancelRecoveryRequest(newSessionKey: ethers.AddressLike, verifyerKey: ethers.Wallet): Promise<ethers.ContractTransactionReceipt> {
+    async cancelRecoveryRequest(newSessionKey: ethers.AddressLike, verifyerKey: ethers.HDNodeWallet): Promise<ethers.ContractTransactionReceipt> {
         const signTimestamp = Math.floor(Date.now() / 1000);
         const verifyerSignature = await this.authKey!.signTypedData(
             this._pluserModuleTypedData,

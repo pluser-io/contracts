@@ -105,6 +105,19 @@ export const setupTestEnv = async () =>
         };
     })();
 
+export const setNextTime = async (time: number) => {
+    await hardhatEthers.provider.send("evm_setNextBlockTimestamp", [time]);
+    await hardhatEthers.provider.send("evm_mine", []);
+};
+
+export const getLastTimestamp = async (): Promise<number> => {
+    const provider = (await getTestnetSignerBySender(Sender.User)).provider!;
+    const blockNumber = await provider.getBlockNumber();
+    const block = await provider.getBlock(blockNumber);
+
+    return block.timestamp;
+};
+
 /*
 
 const deployAccount = async (accountAuthKey: Wallet, accountDeivceKey: Wallet, factory: Factory): Promise<DeployedAccountInfo> => {
